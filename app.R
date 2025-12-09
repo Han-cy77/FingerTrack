@@ -15,7 +15,7 @@ ui <- fluidPage(
   
   # 3. 页面主体内容
   div(id = "container",
-      h2("R Shiny 隔空手势画板", style="text-align:center; position:absolute; width:100%; top:0; z-index:10;"),
+      h2("隔空手势画板", style="text-align:center; position:absolute; width:100%; top:0; z-index:10;"),
       
       div(id = "loading-msg", class = "loading-msg", "正在初始化 AI 模型..."),
       

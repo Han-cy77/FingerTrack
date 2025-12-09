@@ -1,175 +1,284 @@
 // www/script.js
 
-// 1. 全局变量与配置
 const videoElement = document.getElementById('input_video');
 const canvasElement = document.getElementById('output_canvas');
 const canvasCtx = canvasElement.getContext('2d');
 const loadingMsg = document.getElementById('loading-msg');
 
-// 创建离屏 Canvas (用于保存你的绘画笔迹，防止被视频帧刷新掉)
+// --- 离屏 Canvas (存储画好的内容) ---
 const paintCanvas = document.createElement('canvas');
 paintCanvas.width = 1280;
 paintCanvas.height = 720;
 const paintCtx = paintCanvas.getContext('2d');
 
-// 定义工具箱 (画笔和橡皮)
-let tools = [
-  // 注意看这里：originX 和 originY 必须都有，且数值与 x, y 一致
-  { name: 'Red',    color: '#FF4444', x: 80,  y: 150, originX: 80,  originY: 150, r: 30, type: 'pen' },
-  { name: 'Blue',   color: '#4444FF', x: 80,  y: 250, originX: 80,  originY: 250, r: 30, type: 'pen' },
-  { name: 'Green',  color: '#44FF44', x: 80,  y: 350, originX: 80,  originY: 350, r: 30, type: 'pen' },
-  { name: 'Eraser', color: '#FFFFFF', x: 80,  y: 500, originX: 80,  originY: 500, r: 40, type: 'eraser' }
+// --- 1. 定义调色盘 (双列布局) ---
+// r: 半径, x/y: 坐标
+const palette = [
+  // 左侧列
+  { name: '红',   color: '#FF3B30', x: 50, y: 80,  r: 25, type: 'pen' },
+  { name: '橙',   color: '#FF9500', x: 50, y: 150, r: 25, type: 'pen' },
+  { name: '黄',   color: '#FFCC00', x: 50, y: 220, r: 25, type: 'pen' },
+  { name: '绿',   color: '#34C759', x: 50, y: 290, r: 25, type: 'pen' },
+  { name: '青',   color: '#5AC8FA', x: 50, y: 360, r: 25, type: 'pen' },
+  
+  // 右侧列
+  { name: '蓝',   color: '#007AFF', x: 110, y: 80,  r: 25, type: 'pen' },
+  { name: '紫',   color: '#AF52DE', x: 110, y: 150, r: 25, type: 'pen' },
+  { name: '粉',   color: '#FF2D55', x: 110, y: 220, r: 25, type: 'pen' },
+  { name: '棕',   color: '#A2845E', x: 110, y: 290, r: 25, type: 'pen' },
+  { name: '黑',   color: '#000000', x: 110, y: 360, r: 25, type: 'pen' },
+
+  // 功能区 (下方)
+  { name: '橡皮', color: '#FFFFFF', x: 80,  y: 600, r: 35, type: 'eraser' },
+  { name: '清空', color: '#888888', x: 80,  y: 680, r: 30, type: 'clear' }
 ];
 
-let activeTool = null; // 当前手里拿的工具
-let prevX = 0, prevY = 0; // 上一帧的手指坐标
+// --- 2. 定义粗细滑动条区域 ---
+const slider = {
+  x: 160,        // 滑动条中心 X 坐标
+  yStart: 100,   // 顶部 Y
+  yEnd: 400,     // 底部 Y
+  width: 20,     // 宽度
+  minSize: 2,    // 最小笔触
+  maxSize: 40,   // 最大笔触
+  currentY: 150  // 当前滑块的位置 (初始值)
+};
 
-// 2. 核心处理函数：每一帧都会运行
+// --- 3. 当前画笔状态 ---
+let brush = {
+  color: '#FF3B30', 
+  width: 8,         
+  mode: 'source-over'
+};
+
+let prevX = 0, prevY = 0; 
+
+// 根据滑块 Y 坐标计算笔刷大小
+function updateBrushSize(y) {
+  // 限制 Y 范围
+  let clampedY = Math.max(slider.yStart, Math.min(y, slider.yEnd));
+  slider.currentY = clampedY;
+  
+  // 计算比例 (0.0 - 1.0)
+  let ratio = (clampedY - slider.yStart) / (slider.yEnd - slider.yStart);
+  
+  // 映射到笔刷大小
+  brush.width = slider.minSize + ratio * (slider.maxSize - slider.minSize);
+}
+
+// 初始计算一次大小
+updateBrushSize(slider.currentY);
+
+
+// --- 4. 核心循环函数 ---
 function onResults(results) {
-  // 隐藏加载提示
   if(loadingMsg) loadingMsg.style.display = 'none';
 
-  // --- A. 基础绘制 ---
-  // 清空主画板
+  // A. 基础渲染
+  canvasCtx.save();
   canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-  // 1. 画摄像头画面 (背景)
   canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-  // 2. 画已经画好的笔迹 (离屏 Canvas)
   canvasCtx.drawImage(paintCanvas, 0, 0);
 
-  // --- B. 手势识别逻辑 ---
+  // B. 绘制 UI
+  drawInterface(canvasCtx);
+
+  // C. 手势识别
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
     const landmarks = results.multiHandLandmarks[0];
 
-    // 获取关键点坐标 (MediaPipe 返回 0-1 的比例，需转为像素)
-    // 8: 食指指尖, 4: 拇指指尖
     const indexX = landmarks[8].x * canvasElement.width;
     const indexY = landmarks[8].y * canvasElement.height;
     const thumbX = landmarks[4].x * canvasElement.width;
     const thumbY = landmarks[4].y * canvasElement.height;
 
-    // 计算中心点 (手指捏合的中心)
     const centerX = (indexX + thumbX) / 2;
     const centerY = (indexY + thumbY) / 2;
 
-    // 计算两指距离
     const distance = Math.hypot(indexX - thumbX, indexY - thumbY);
-    const isPinching = distance < 60; // 阈值 60px 视为捏合
+    const isPinching = distance < 60; 
+
+    // 绘制虚拟光标
+    drawCursor(canvasCtx, centerX, centerY, brush.color, isPinching);
 
     if (isPinching) {
-      // === 状态：捏合中 ===
-      
-      // 1. 如果手里没工具，判断是否抓到了工具
-      if (!activeTool) {
-        for (let tool of tools) {
-          // 计算手心到工具的距离
-          const distToTool = Math.hypot(centerX - tool.x, centerY - tool.y);
-          if (distToTool < tool.r + 20) { // +20 是容错范围
-            activeTool = tool;
-            break; 
+      // === 捏合状态 ===
+
+      // 1. 检查是否在 滑动条 区域内
+      // 判定范围稍微给宽一点 (X ± 30)，方便操作
+      if (Math.abs(centerX - slider.x) < 30 && centerY > slider.yStart - 20 && centerY < slider.yEnd + 20) {
+        updateBrushSize(centerY); // 更新粗细
+        prevX = 0; prevY = 0; // 不画画
+      }
+      // 2. 检查是否按了 按钮
+      else {
+        let touchedButton = null;
+        for (let btn of palette) {
+          if (Math.hypot(centerX - btn.x, centerY - btn.y) < btn.r) {
+            touchedButton = btn;
+            break;
+          }
+        }
+
+        if (touchedButton) {
+          activateButton(touchedButton);
+          prevX = 0; prevY = 0;
+        } else {
+          // 3. 既没碰滑条也没碰按钮 -> 画画
+          // 只有在右侧区域才画 (x > 200)，防止误触 UI
+          if (centerX > 200) {
+             drawOnCanvas(centerX, centerY);
           }
         }
       }
-
-      // 2. 如果手里有工具，移动工具并绘画
-      if (activeTool) {
-        // 工具跟随手指
-        activeTool.x = centerX;
-        activeTool.y = centerY;
-
-        // 在 paintCanvas 上绘画
-        paintCtx.beginPath();
-        paintCtx.lineWidth = (activeTool.type === 'eraser') ? 50 : 12;
-        paintCtx.lineCap = 'round';
-        paintCtx.lineJoin = 'round';
-
-        if (activeTool.type === 'eraser') {
-          paintCtx.globalCompositeOperation = 'destination-out'; // 擦除模式
-        } else {
-          paintCtx.globalCompositeOperation = 'source-over'; // 覆盖模式
-          paintCtx.strokeStyle = activeTool.color;
-        }
-
-        // 绘制线条 (从上一点连到当前点)
-        if (prevX === 0 && prevY === 0) {
-           paintCtx.moveTo(centerX, centerY);
-        } else {
-           paintCtx.moveTo(prevX, prevY);
-        }
-        paintCtx.lineTo(centerX, centerY);
-        paintCtx.stroke();
-        
-        // 恢复混合模式
-        paintCtx.globalCompositeOperation = 'source-over';
-      }
-
-      // 记录当前点作为下一次的起点
-      prevX = centerX;
-      prevY = centerY;
-
-      // 在手指中间画个绿色提示点
-      canvasCtx.beginPath();
-      canvasCtx.arc(centerX, centerY, 8, 0, 2 * Math.PI);
-      canvasCtx.fillStyle = '#00FF00';
-      canvasCtx.fill();
-
+      
     } else {
-      // === 状态：松开 ===
-      
-      if (activeTool) {
-        // 放下工具：让它飞回原位
-        activeTool.x = activeTool.originX; // 这里要注意，js对象是引用，修改属性即可
-        activeTool.y = activeTool.originY; // 实际上 tools 数组里的数据也被改回去了
-        activeTool = null;
-      }
-      
-      // 重置绘图路径起点
-      prevX = 0;
-      prevY = 0;
+      // === 松开状态 ===
+      prevX = 0; prevY = 0;
     }
   }
-
-  // --- C. 绘制 UI 工具图标 (画在最上层) ---
-  for (let tool of tools) {
-    canvasCtx.beginPath();
-    canvasCtx.arc(tool.x, tool.y, tool.r, 0, 2 * Math.PI);
-    
-    // 填充颜色
-    canvasCtx.fillStyle = tool.color;
-    if (tool.type === 'eraser') {
-      canvasCtx.fillStyle = '#EEE'; // 橡皮显示为灰白色
-      canvasCtx.lineWidth = 2;
-      canvasCtx.strokeStyle = '#333';
-      canvasCtx.stroke();
-    }
-    canvasCtx.fill();
-
-    // 绘制文字标签
-    canvasCtx.fillStyle = (tool.type === 'eraser') ? '#333' : 'white';
-    canvasCtx.font = 'bold 12px Arial';
-    canvasCtx.textAlign = 'center';
-    canvasCtx.textBaseline = 'middle';
-    canvasCtx.fillText(tool.name, tool.x, tool.y);
-  }
-
   canvasCtx.restore();
 }
 
-// 3. 初始化 MediaPipe Hands
+function activateButton(btn) {
+  if (btn.type === 'pen') {
+    brush.color = btn.color;
+    brush.mode = 'source-over';
+    // 切换回笔的时候，恢复滑动条设定的大小
+    let ratio = (slider.currentY - slider.yStart) / (slider.yEnd - slider.yStart);
+    brush.width = slider.minSize + ratio * (slider.maxSize - slider.minSize);
+  } else if (btn.type === 'eraser') {
+    brush.mode = 'destination-out';
+    brush.width = 60; // 橡皮默认大一点，不随滑条变
+  } else if (btn.type === 'clear') {
+    paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+  }
+}
+
+function drawOnCanvas(x, y) {
+  paintCtx.beginPath();
+  paintCtx.lineWidth = brush.width;
+  paintCtx.lineCap = 'round';
+  paintCtx.lineJoin = 'round';
+  paintCtx.globalCompositeOperation = brush.mode;
+  paintCtx.strokeStyle = brush.color;
+
+  if (prevX === 0 && prevY === 0) {
+    paintCtx.moveTo(x, y);
+  } else {
+    paintCtx.moveTo(prevX, prevY);
+  }
+  paintCtx.lineTo(x, y);
+  paintCtx.stroke();
+  paintCtx.globalCompositeOperation = 'source-over';
+  prevX = x; prevY = y;
+}
+
+// --- 绘制 UI 界面 (含滑条) ---
+function drawInterface(ctx) {
+  // 背景遮罩扩大一点
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+  ctx.fillRect(0, 0, 200, 720); // 覆盖滑条和按钮区域
+
+  // 1. 绘制按钮
+  for (let btn of palette) {
+    ctx.beginPath();
+    ctx.arc(btn.x, btn.y, btn.r, 0, 2 * Math.PI);
+    
+    if (btn.type === 'clear') ctx.fillStyle = '#666';
+    else if (btn.type === 'eraser') ctx.fillStyle = '#EEE';
+    else ctx.fillStyle = btn.color;
+    ctx.fill();
+
+    // 选中高亮
+    let isSelected = false;
+    if (brush.mode === 'destination-out' && btn.type === 'eraser') isSelected = true;
+    else if (brush.mode === 'source-over' && btn.color === brush.color && btn.type === 'pen') isSelected = true;
+
+    if (isSelected) {
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'white';
+      ctx.stroke();
+    }
+    
+    // 文字 (镜像反转)
+    ctx.save();
+    ctx.translate(btn.x, btn.y);
+    ctx.scale(-1, 1); 
+    ctx.fillStyle = (btn.type === 'eraser' || btn.name === '黄' || btn.name === '青' || btn.name === '粉') ? '#333' : 'white';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(btn.name, 0, 0);
+    ctx.restore();
+  }
+
+  // 2. 绘制滑动条 (Slider)
+  // 轨道
+  ctx.beginPath();
+  ctx.moveTo(slider.x, slider.yStart);
+  ctx.lineTo(slider.x, slider.yEnd);
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = '#888';
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // 滑块 (Handle)
+  ctx.beginPath();
+  ctx.arc(slider.x, slider.currentY, 15, 0, 2 * Math.PI);
+  ctx.fillStyle = 'white';
+  ctx.fill();
+  
+  // 在滑块中间显示当前大小的圆点预览
+  ctx.beginPath();
+  // 这里的预览圆点大小稍微缩小一点，不然太大了挡住滑块
+  let previewSize = Math.min(12, brush.width / 2);
+  ctx.arc(slider.x, slider.currentY, previewSize, 0, 2 * Math.PI);
+  ctx.fillStyle = brush.mode === 'destination-out' ? '#333' : brush.color;
+  ctx.fill();
+
+  // 文字标签 "粗细"
+  ctx.save();
+  ctx.translate(slider.x, slider.yStart - 20);
+  ctx.scale(-1, 1);
+  ctx.fillStyle = '#DDD';
+  ctx.font = '14px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText("粗细", 0, 0);
+  ctx.restore();
+}
+
+function drawCursor(ctx, x, y, color, isPinching) {
+  ctx.beginPath();
+  let r = isPinching ? (brush.width / 2) : 10; // 捏合时显示实际画笔大小
+  if (r < 5) r = 5; // 最小显示尺寸
+  ctx.arc(x, y, r, 0, 2 * Math.PI);
+  
+  if (brush.mode === 'destination-out') {
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+// MediaPipe 初始化代码保持不变
 const hands = new Hands({locateFile: (file) => {
   return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
 }});
-
 hands.setOptions({
-  maxNumHands: 1,            // 只识别一只手
-  modelComplexity: 1,        // 模型精度 (0:快, 1:中)
+  maxNumHands: 1,
+  modelComplexity: 1,
   minDetectionConfidence: 0.5,
   minTrackingConfidence: 0.5
 });
-
 hands.onResults(onResults);
 
-// 4. 初始化摄像头
 const camera = new Camera(videoElement, {
   onFrame: async () => {
     await hands.send({image: videoElement});
@@ -177,6 +286,4 @@ const camera = new Camera(videoElement, {
   width: 1280,
   height: 720
 });
-
-// 启动！
 camera.start();

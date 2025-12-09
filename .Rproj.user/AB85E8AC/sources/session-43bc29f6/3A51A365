@@ -1,9 +1,9 @@
 {
     "id": "3A51A365",
-    "path": "/Users/ther/Documents/GitHub/FingerTrack/www/script.js",
+    "path": "~/Documents/GitHub/FingerTrack/www/script.js",
     "project_path": "www/script.js",
     "type": "js",
-    "hash": "3993332526",
+    "hash": "0",
     "contents": "",
     "dirty": false,
     "created": 1765285519403.0,
@@ -13,15 +13,15 @@
         "tempName": "Untitled1",
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "21,2",
-        "scrollLine": "6"
+        "cursorPosition": "47,7",
+        "scrollLine": "38"
     },
     "folds": "",
-    "lastKnownWriteTime": 1765285667,
+    "lastKnownWriteTime": 1765286761,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1765285667446,
+    "last_content_update": 1765286761744,
     "read_only": false,
     "read_only_alternatives": []
 }
