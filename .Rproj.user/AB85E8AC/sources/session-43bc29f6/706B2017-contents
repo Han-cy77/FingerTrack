@@ -1,0 +1,49 @@
+/* www/style.css */
+body {
+  background-color: #f4f4f9;
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+h2 {
+  color: #333;
+  margin-bottom: 10px;
+}
+
+#container {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+  overflow: hidden;
+}
+
+/* 隐藏原始的 HTML video 标签，我们只看 Canvas */
+#input_video {
+  display: none;
+}
+
+/* 翻转 Canvas，制作镜像效果，让操作更自然 */
+#output_canvas {
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1); 
+  display: block;
+}
+
+.loading-msg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 24px;
+  color: #666;
+  pointer-events: none;
+}
